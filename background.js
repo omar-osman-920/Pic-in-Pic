@@ -208,95 +208,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     globalPipState.size = request.size || globalPipState.size;
     
     // Update badge to show PiP is active
-    chrome.action.setBadgeText({
-      text: '●',
-      tabId: sender.tab.id
-    });
-    chrome.action.setBadgeBackgroundColor({
-      color: '#007bff'
-    });
-  } else if (request.action === 'pipClosed') {
-    // Clear global PiP state
-    globalPipState.isActive = false;
-    globalPipState.content = null;
-    globalPipState.sourceTabId = null;
-    
-    // Clear badge
-    chrome.action.setBadgeText({
-      text: '',
-      tabId: sender.tab.id
-    });
-  } else if (request.action === 'pipStateUpdate') {
-    // Update global PiP state
-    if (globalPipState.isActive) {
-      globalPipState.position = request.position || globalPipState.position;
-      globalPipState.size = request.size || globalPipState.size;
-      globalPipState.content = request.content || globalPipState.content;
-    }
-  } else if (request.action === 'getPipState') {
-    // Return current PiP state
-    sendResponse(globalPipState);
-    return true;
   }
-});
+}
+)
 
-// Enhanced tab cleanup with PiP state management
+// Clean up when tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
-  // Remove from PiP capable tabs
-  pipCapableTabs.delete(tabId);
-  
-  // If this was the source tab for PiP, try to maintain PiP in another tab
-  if (globalPipState.isActive && globalPipState.sourceTabId === tabId) {
-    console.log('Source tab closed, attempting to maintain PiP in another tab');
-    maintainPipInCurrentContext();
-  }
-  
-  // Clear badge for this specific tab (cleanup)
-  try {
-    chrome.action.setBadgeText({
-      text: '',
-      tabId: tabId
-    });
-  } catch (error) {
-    // Tab already closed, ignore error
-  }
-});
-
-// Handle tab updates (URL changes, reloads)
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // If tab completed loading and PiP is active, try to restore
-  if (changeInfo.status === 'complete' && 
-      globalPipState.isActive && 
-      pipCapableTabs.has(tabId) && 
-      !isRestrictedUrl(tab.url)) {
-    
-    try {
-      // Small delay to ensure page is fully ready
-      setTimeout(async () => {
-        await injectPipIntoTab(tabId);
-      }, 200);
-    } catch (error) {
-      console.warn('Failed to restore PiP after tab update:', error);
-    }
-  }
-});
-
-// Restore PiP state on extension startup
-chrome.runtime.onStartup.addListener(async () => {
-  try {
-    const result = await chrome.storage.local.get('globalPipState');
-    if (result.globalPipState && result.globalPipState.isActive) {
-      globalPipState = { ...globalPipState, ...result.globalPipState };
-      
-      // Try to restore PiP in current active tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs.length > 0 && !isRestrictedUrl(tabs[0].url)) {
-        await injectPipIntoTab(tabs[0].id);
-      }
-    }
-  } catch (error) {
-    console.error('Error restoring PiP state on startup:', error);
-  }
+  chrome.action.setBadgeText({
+    text: '',
+    tabId: tabId
+  });
 });
 
 // Handle keyboard shortcuts
