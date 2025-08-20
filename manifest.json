@@ -5,7 +5,8 @@
   "description": "Convert any selected element into an interactive floating picture-in-picture window",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "tabs"
   ],
   "host_permissions": [
     "http://*/*",

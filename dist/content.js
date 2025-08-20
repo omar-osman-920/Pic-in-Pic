@@ -2,6 +2,7 @@ class InteractivePiP {
   constructor() {
     this.isSelecting = false;
     this.pipWindow = null;
+    this.isPersistentPip = false;
     this.selectedElement = null;
     this.overlay = null;
     this.highlight = null;
@@ -26,6 +27,19 @@ class InteractivePiP {
     this.bindEvents();
     this.loadSettings();
     this.setupStateSync();
+    this.checkForExistingPip();
+  }
+  
+  async checkForExistingPip() {
+    // Check if there's an existing PiP that should be restored
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'getPipState' });
+      if (response && response.isActive && !this.pipWindow) {
+        this.restorePersistentPip(response);
+      }
+    } catch (error) {
+      console.log('Could not check for existing PiP:', error);
+    }
   }
 
   async loadSettings() {
@@ -103,6 +117,12 @@ class InteractivePiP {
             isSelecting: this.isSelecting,
             pipActive: this.pipWindow !== null
           });
+          break;
+        case 'restorePip':
+          if (request.pipState && request.pipState.isActive) {
+            this.restorePersistentPip(request.pipState);
+          }
+          sendResponse({ success: true });
           break;
       }
       return true;
@@ -183,8 +203,10 @@ class InteractivePiP {
       this.closePip();
     }
 
+    this.isPersistentPip = true;
     this.pipWindow = document.createElement('div');
     this.pipWindow.className = 'pip-window';
+    this.pipWindow.id = 'persistent-pip-window';
     
     // Create header with enhanced controls
     const header = document.createElement('div');
@@ -243,7 +265,12 @@ class InteractivePiP {
     this.applyResponsiveScaling();
     
     // Notify background script
-    chrome.runtime.sendMessage({ action: 'pipCreated' });
+    chrome.runtime.sendMessage({ 
+      action: 'pipCreated',
+      content: this.selectedElement.outerHTML,
+      position: { x: 20, y: 20 },
+      size: { width: 400, height: 300 }
+    });
   }
 
   createControlButton(type, symbol, handler) {
@@ -1206,6 +1233,9 @@ class InteractivePiP {
     this.pipWindow.style.top = constrainedY + 'px';
     this.pipWindow.style.right = 'auto';
     this.pipWindow.style.bottom = 'auto';
+    
+    // Update global state
+    this.updatePipState();
   };
 
   handleDragEnd = () => {
@@ -1236,6 +1266,9 @@ class InteractivePiP {
     
     // Apply responsive scaling on resize
     this.applyResponsiveScaling();
+    
+    // Update global state
+    this.updatePipState();
   };
 
   handleResizeEnd = () => {
@@ -1283,6 +1316,9 @@ class InteractivePiP {
     
     // Reapply scaling after size change
     setTimeout(() => this.applyResponsiveScaling(), 100);
+    
+    // Update global state
+    this.updatePipState();
   }
 
   toggleFullscreen() {
@@ -1300,7 +1336,78 @@ class InteractivePiP {
       this.pipWindow.style.width = width + 'px';
       this.pipWindow.style.height = height + 'px';
       this.applyResponsiveScaling();
+      this.updatePipState();
     }
+  }
+  
+  updatePipState() {
+    if (this.pipWindow && this.isPersistentPip) {
+      const rect = this.pipWindow.getBoundingClientRect();
+      chrome.runtime.sendMessage({
+        action: 'pipStateUpdate',
+        position: { x: rect.left, y: rect.top },
+        size: { width: rect.width, height: rect.height },
+        content: this.selectedElement ? this.selectedElement.outerHTML : null
+      });
+    }
+  }
+  
+  restorePersistentPip(pipState) {
+    if (this.pipWindow) return; // Already have PiP
+    
+    // Create a temporary element from stored content
+    if (pipState.content) {
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = pipState.content;
+      const restoredElement = tempDiv.firstElementChild;
+      
+      if (restoredElement) {
+        // Find original element if it exists on current page
+        this.selectedElement = this.findSimilarElement(restoredElement) || restoredElement;
+        this.originalElement = this.selectedElement;
+        
+        // Create PiP window
+        this.createPipWindow();
+        
+        // Restore position and size
+        if (this.pipWindow) {
+          this.pipWindow.style.left = pipState.position.x + 'px';
+          this.pipWindow.style.top = pipState.position.y + 'px';
+          this.pipWindow.style.width = pipState.size.width + 'px';
+          this.pipWindow.style.height = pipState.size.height + 'px';
+        }
+      }
+    }
+  }
+  
+  findSimilarElement(templateElement) {
+    // Try to find a similar element on the current page
+    const tagName = templateElement.tagName;
+    const className = templateElement.className;
+    const id = templateElement.id;
+    
+    // Try ID first
+    if (id) {
+      const byId = document.getElementById(id);
+      if (byId) return byId;
+    }
+    
+    // Try class name
+    if (className) {
+      const byClass = document.querySelector(`.${className.split(' ')[0]}`);
+      if (byClass) return byClass;
+    }
+    
+    // Try tag name with similar content
+    const byTag = document.querySelectorAll(tagName);
+    for (const element of byTag) {
+      if (element.textContent && templateElement.textContent &&
+          element.textContent.trim() === templateElement.textContent.trim()) {
+        return element;
+      }
+    }
+    
+    return null;
   }
 
   closePip() {
