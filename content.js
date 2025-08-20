@@ -320,11 +320,6 @@ class InteractivePiP {
       this.copyComputedStyles(sourceChildren[i], targetChildren[i], targetWindow);
     }
   }
-      }
-    });
-    
-    return `* { ${styles.join(' ')} }`;
-  }
 
   getElementTitle(element) {
     return element.getAttribute('title') || 
