@@ -224,15 +224,6 @@ class InteractivePiP {
         </head>
         <body>
           ${elementHTML}
-          <script>
-            // Forward events to parent window if needed
-            document.addEventListener('click', function(e) {
-              if (e.target.tagName === 'A' && e.target.href) {
-                e.preventDefault();
-                window.parent.open(e.target.href, '_blank');
-              }
-            });
-          </script>
         </body>
         </html>
       `;
@@ -241,6 +232,14 @@ class InteractivePiP {
         iframe.contentDocument.open();
         iframe.contentDocument.write(iframeContent);
         iframe.contentDocument.close();
+        
+        // Add event listener after document is loaded to avoid CSP issues
+        iframe.contentDocument.addEventListener('click', function(e) {
+          if (e.target.tagName === 'A' && e.target.href) {
+            e.preventDefault();
+            window.parent.open(e.target.href, '_blank');
+          }
+        });
       };
       
       container.appendChild(iframe);
