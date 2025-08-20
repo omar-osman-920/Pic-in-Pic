@@ -60,14 +60,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 // Handle keyboard shortcuts
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command === 'toggle-selection') {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    try {
-      await chrome.tabs.sendMessage(tab.id, { action: 'toggleSelection' });
-    } catch (error) {
-      console.error('Could not toggle selection:', error);
+if (chrome.commands) {
+  chrome.commands.onCommand.addListener(async (command) => {
+    if (command === 'toggle-selection') {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      try {
+        await chrome.tabs.sendMessage(tab.id, { action: 'toggleSelection' });
+      } catch (error) {
+        console.error('Could not toggle selection:', error);
+      }
     }
-  }
-});
+  });
+}
