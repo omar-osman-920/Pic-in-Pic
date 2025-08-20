@@ -329,6 +329,7 @@ class InteractivePiP {
     // Create document structure
     iframeDoc.open();
     iframeDoc.write(`
+      }
       <!DOCTYPE html>
       <html>
       <head>
@@ -347,6 +348,7 @@ class InteractivePiP {
       </head>
       <body></body>
       </html>
+    }
     `);
     iframeDoc.close();
     
@@ -648,6 +650,7 @@ const interactivePiP = new InteractivePiP();
 
 // Add exit animation
 const exitAnimation = `
+  }
   @keyframes pip-window-exit {
     0% {
       transform: scale(1) translateY(0);
@@ -658,6 +661,7 @@ const exitAnimation = `
       opacity: 0;
     }
   }
+}
 `;
 
 const style = document.createElement('style');
