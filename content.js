@@ -13,6 +13,10 @@ class InteractivePiP {
     this.isCreatingPip = false;
     this.loadTimeout = null;
     this.eventListeners = new Map();
+    this.pipState = new Map(); // State synchronization
+    this.originalElement = null;
+    this.mutationObserver = null;
+    this.resizeObserver = null;
     
     this.init();
   }
@@ -21,6 +25,7 @@ class InteractivePiP {
     this.createOverlay();
     this.bindEvents();
     this.loadSettings();
+    this.setupStateSync();
   }
 
   async loadSettings() {
@@ -30,6 +35,38 @@ class InteractivePiP {
     } catch (error) {
       console.log('Could not load settings:', error);
     }
+  }
+
+  setupStateSync() {
+    // Create a shared state management system
+    this.stateManager = {
+      observers: new Set(),
+      state: new Map(),
+      
+      setState: (key, value) => {
+        this.stateManager.state.set(key, value);
+        this.stateManager.notifyObservers(key, value);
+      },
+      
+      getState: (key) => {
+        return this.stateManager.state.get(key);
+      },
+      
+      subscribe: (callback) => {
+        this.stateManager.observers.add(callback);
+        return () => this.stateManager.observers.delete(callback);
+      },
+      
+      notifyObservers: (key, value) => {
+        this.stateManager.observers.forEach(callback => {
+          try {
+            callback(key, value);
+          } catch (error) {
+            console.error('State observer error:', error);
+          }
+        });
+      }
+    };
   }
 
   createOverlay() {
@@ -137,6 +174,7 @@ class InteractivePiP {
 
   selectElement(element) {
     this.selectedElement = element;
+    this.originalElement = element;
     this.createPipWindow();
   }
 
@@ -148,7 +186,7 @@ class InteractivePiP {
     this.pipWindow = document.createElement('div');
     this.pipWindow.className = 'pip-window';
     
-    // Create header
+    // Create header with enhanced controls
     const header = document.createElement('div');
     header.className = 'pip-header';
     
@@ -159,35 +197,31 @@ class InteractivePiP {
     const controls = document.createElement('div');
     controls.className = 'pip-controls';
     
-    // Control buttons
-    const minimizeBtn = document.createElement('button');
-    minimizeBtn.className = 'pip-control-btn pip-minimize-btn';
-    minimizeBtn.innerHTML = '−';
-    minimizeBtn.addEventListener('click', () => this.toggleMinimize());
-    
-    const maximizeBtn = document.createElement('button');
-    maximizeBtn.className = 'pip-control-btn pip-maximize-btn';
-    maximizeBtn.innerHTML = '⌐';
-    maximizeBtn.addEventListener('click', () => this.toggleMaximize());
-    
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'pip-control-btn pip-close-btn';
-    closeBtn.innerHTML = '×';
-    closeBtn.addEventListener('click', () => this.closePip());
+    // Enhanced control buttons
+    const minimizeBtn = this.createControlButton('minimize', '−', () => this.toggleMinimize());
+    const maximizeBtn = this.createControlButton('maximize', '⌐', () => this.toggleMaximize());
+    const fullscreenBtn = this.createControlButton('fullscreen', '⛶', () => this.toggleFullscreen());
+    const closeBtn = this.createControlButton('close', '×', () => this.closePip());
     
     controls.appendChild(minimizeBtn);
     controls.appendChild(maximizeBtn);
+    controls.appendChild(fullscreenBtn);
     controls.appendChild(closeBtn);
     
     header.appendChild(title);
     header.appendChild(controls);
     
-    // Create content area
+    // Create content area with responsive container
     const content = document.createElement('div');
     content.className = 'pip-content';
     
-    // Clone the selected element
-    this.createElementCopy(content);
+    // Add responsive wrapper
+    const responsiveWrapper = document.createElement('div');
+    responsiveWrapper.className = 'pip-responsive-wrapper';
+    content.appendChild(responsiveWrapper);
+    
+    // Clone the selected element with full functionality
+    this.createInteractiveContent(responsiveWrapper);
     
     // Create resize handle
     const resizeHandle = document.createElement('div');
@@ -199,12 +233,29 @@ class InteractivePiP {
     
     document.body.appendChild(this.pipWindow);
     
+    // Setup observers for real-time sync
+    this.setupElementObservers();
+    
     // Bind drag and resize events
     this.bindPipEvents(header, resizeHandle);
+    
+    // Apply responsive scaling
+    this.applyResponsiveScaling();
+    
+    // Notify background script
+    chrome.runtime.sendMessage({ action: 'pipCreated' });
   }
 
-  createElementCopy(container) {
-    // Prevent multiple simultaneous PiP creation
+  createControlButton(type, symbol, handler) {
+    const btn = document.createElement('button');
+    btn.className = `pip-control-btn pip-${type}-btn`;
+    btn.innerHTML = symbol;
+    btn.title = type.charAt(0).toUpperCase() + type.slice(1);
+    btn.addEventListener('click', handler);
+    return btn;
+  }
+
+  createInteractiveContent(container) {
     if (this.isCreatingPip) {
       console.warn('PiP creation already in progress');
       return;
@@ -212,126 +263,70 @@ class InteractivePiP {
     
     this.isCreatingPip = true;
     
-    // Clear any existing timeout
-    if (this.loadTimeout) {
+    try {
+      if (this.maintainInteractivity) {
+        this.createFullyInteractiveContent(container);
+      } else {
+        this.createStaticContent(container);
+      }
+    } catch (error) {
+      console.error('Error creating PiP content:', error);
+      this.createFallbackContent(container);
+    } finally {
+      this.isCreatingPip = false;
+    }
+  }
+
+  createFullyInteractiveContent(container) {
+    // Create a sandboxed iframe with full interactivity
+    const iframe = document.createElement('iframe');
+    iframe.className = 'pip-interactive-frame';
+    iframe.style.cssText = `
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: white;
+      border-radius: 8px;
+    `;
+    
+    // Enhanced sandbox permissions for full functionality
+    iframe.setAttribute('sandbox', 
+      'allow-same-origin allow-scripts allow-forms allow-popups ' +
+      'allow-popups-to-escape-sandbox allow-presentation allow-top-navigation-by-user-activation'
+    );
+    
+    let isLoaded = false;
+    
+    // Timeout protection
+    this.loadTimeout = setTimeout(() => {
+      if (!isLoaded) {
+        console.warn('PiP iframe loading timeout, falling back to static content');
+        this.fallbackToStaticContent(container, iframe);
+      }
+    }, 3000);
+    
+    const handleLoad = () => {
+      if (isLoaded) return;
+      isLoaded = true;
+      
       clearTimeout(this.loadTimeout);
       this.loadTimeout = null;
-    }
-
-    if (this.maintainInteractivity) {
-      // Create an iframe for interactive content
-      const iframe = document.createElement('iframe');
-      iframe.style.width = '100%';
-      iframe.style.height = '100%';
-      iframe.style.border = 'none';
       
-      iframe.onload = () => {
-        const iframeDoc = iframe.contentDocument;
-        const iframeWindow = iframe.contentWindow;
-        
-        // Copy all stylesheets from parent document
-        const parentStyleSheets = Array.from(document.styleSheets);
-        parentStyleSheets.forEach(styleSheet => {
-          try {
-            if (styleSheet.href) {
-              // External stylesheet
-              const link = iframeDoc.createElement('link');
-              link.rel = 'stylesheet';
-              link.href = styleSheet.href;
-              iframeDoc.head.appendChild(link);
-            } else if (styleSheet.cssRules) {
-              // Inline stylesheet
-              const style = iframeDoc.createElement('style');
-              Array.from(styleSheet.cssRules).forEach(rule => {
-                style.textContent += rule.cssText + '\n';
-              });
-              iframeDoc.head.appendChild(style);
-            }
-          } catch (e) {
-            // Handle CORS issues with external stylesheets
-            console.log('Could not copy stylesheet:', e);
-          }
-        });
-        
-        // Add base styles for proper rendering
-        const baseStyle = iframeDoc.createElement('style');
-        baseStyle.textContent = `
-          body { 
-            margin: 0; 
-            padding: 10px; 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-            background: white;
-          }
-        `;
-        iframeDoc.head.appendChild(baseStyle);
-        
-        // Clone and insert element
-        const clonedElement = this.selectedElement.cloneNode(true);
-        this.copyComputedStyles(this.selectedElement, clonedElement, iframeWindow);
-        
-        iframeDoc.body.appendChild(clonedElement);
-        
-        this.isCreatingPip = false;
-      };
-      
-      iframe.src = 'about:blank';
-      container.appendChild(iframe);
-      
-      this.createInteractiveContent(container);
-    } else {
-      // Simple clone without interactivity
-      this.createStaticContent(container);
-    }
+      try {
+        this.populateInteractiveFrame(iframe);
+        this.setupFrameEventBridge(iframe);
+      } catch (error) {
+        console.error('Error populating interactive frame:', error);
+        this.fallbackToStaticContent(container, iframe);
+      }
+    };
+    
+    iframe.addEventListener('load', handleLoad, { once: true });
+    iframe.src = 'about:blank';
+    container.appendChild(iframe);
   }
 
-  createInteractiveContent(container) {
-    try {
-      const iframe = document.createElement('iframe');
-      iframe.style.cssText = 'width: 100%; height: 100%; border: none; background: white;';
-      iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups');
-      
-      let isLoaded = false;
-      
-      // Set loading timeout to prevent infinite loading
-      this.loadTimeout = setTimeout(() => {
-        if (!isLoaded) {
-          console.error('PiP iframe loading timeout');
-          this.fallbackToStaticContent(container, iframe);
-        }
-      }, 5000);
-      
-      // Single load event handler
-      const handleLoad = () => {
-        if (isLoaded) return;
-        isLoaded = true;
-        
-        clearTimeout(this.loadTimeout);
-        this.loadTimeout = null;
-        
-        try {
-          this.populateIframeContent(iframe);
-        } catch (error) {
-          console.error('Error populating iframe:', error);
-          this.fallbackToStaticContent(container, iframe);
-        } finally {
-          this.isCreatingPip = false;
-        }
-      };
-      
-      // Use addEventListener instead of onload to prevent conflicts
-      iframe.addEventListener('load', handleLoad, { once: true });
-      
-      // Set src to about:blank to initialize
-      iframe.src = 'about:blank';
-      container.appendChild(iframe);
-      
-    } catch (error) {
-      console.error('Error creating interactive content:', error);
-      this.createStaticContent(container);
-    }
-  }
-  
-  populateIframeContent(iframe) {
+  populateInteractiveFrame(iframe) {
     const iframeDoc = iframe.contentDocument;
     const iframeWindow = iframe.contentWindow;
     
@@ -339,129 +334,380 @@ class InteractivePiP {
       throw new Error('Cannot access iframe document');
     }
     
-    // Create document structure
+    // Create complete document structure
     iframeDoc.open();
     iframeDoc.write(`
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>PiP Content</title>
         <style>
-          body { 
+          * { box-sizing: border-box; }
+          html, body { 
             margin: 0; 
-            padding: 10px; 
+            padding: 0; 
+            width: 100%;
+            height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
             background: white;
             overflow: auto;
           }
-          * { box-sizing: border-box; }
+          
+          /* PiP-specific responsive styles */
+          .pip-responsive {
+            transform-origin: top left;
+            transition: transform 0.2s ease;
+          }
+          
+          /* Scale down for PiP mode */
+          @media (max-width: 600px) {
+            .pip-responsive {
+              transform: scale(0.8);
+            }
+          }
+          
+          @media (max-width: 400px) {
+            .pip-responsive {
+              transform: scale(0.6);
+            }
+          }
+          
+          /* Ensure interactive elements remain clickable */
+          button, input, select, textarea, a {
+            pointer-events: auto !important;
+            cursor: pointer !important;
+          }
+          
+          /* Enhanced visibility for small screens */
+          button {
+            min-height: 32px !important;
+            min-width: 32px !important;
+            font-size: 14px !important;
+          }
         </style>
       </head>
-      <body></body>
+      <body>
+        <div class="pip-responsive" id="pip-content-root"></div>
+      </body>
       </html>
     `);
     iframeDoc.close();
     
-    // Copy stylesheets safely
-    this.copyStylesheets(iframeDoc);
+    // Copy all stylesheets from parent document
+    this.copyAllStylesheets(iframeDoc);
     
-    // Clone and insert element
+    // Clone and insert the selected element
+    const contentRoot = iframeDoc.getElementById('pip-content-root');
     const clonedElement = this.selectedElement.cloneNode(true);
+    
+    // Apply computed styles to maintain appearance
     this.copyComputedStyles(this.selectedElement, clonedElement, iframeWindow);
     
-    iframeDoc.body.appendChild(clonedElement);
+    // Make element responsive for PiP
+    clonedElement.classList.add('pip-responsive');
     
-    // Add safe event handling
-    this.addSafeEventHandling(iframeDoc);
+    contentRoot.appendChild(clonedElement);
+    
+    // Setup interactive event handling
+    this.setupInteractiveEvents(iframeDoc, clonedElement);
   }
-  
-  copyStylesheets(iframeDoc) {
+
+  copyAllStylesheets(iframeDoc) {
     try {
       const stylesheets = Array.from(document.styleSheets);
       let copiedCount = 0;
-      const maxStylesheets = 10; // Limit to prevent performance issues
+      const maxStylesheets = 15;
       
       for (const stylesheet of stylesheets) {
         if (copiedCount >= maxStylesheets) break;
         
         try {
           if (stylesheet.href && !stylesheet.href.startsWith('chrome-extension://')) {
+            // External stylesheet
             const link = iframeDoc.createElement('link');
             link.rel = 'stylesheet';
+            link.type = 'text/css';
             link.href = stylesheet.href;
+            link.crossOrigin = 'anonymous';
             iframeDoc.head.appendChild(link);
             copiedCount++;
-          } else if (stylesheet.cssRules && stylesheet.cssRules.length < 1000) {
+          } else if (stylesheet.cssRules && stylesheet.cssRules.length < 2000) {
+            // Inline stylesheet
             const style = iframeDoc.createElement('style');
-            const rules = Array.from(stylesheet.cssRules).slice(0, 500); // Limit rules
+            style.type = 'text/css';
+            
+            const rules = Array.from(stylesheet.cssRules).slice(0, 1000);
             style.textContent = rules.map(rule => rule.cssText).join('\n');
+            
             iframeDoc.head.appendChild(style);
             copiedCount++;
           }
         } catch (e) {
-          // Skip problematic stylesheets
-          console.log('Skipped stylesheet due to CORS or other issues');
+          // Skip problematic stylesheets (CORS, etc.)
+          console.log('Skipped stylesheet:', e.message);
         }
       }
     } catch (error) {
       console.warn('Error copying stylesheets:', error);
     }
   }
-  
-  addSafeEventHandling(iframeDoc) {
-    // Prevent memory leaks by using a single delegated event listener
-    const handleClick = (e) => {
-      if (e.target.tagName === 'A' && e.target.href) {
+
+  setupInteractiveEvents(iframeDoc, clonedElement) {
+    // Enhanced event delegation for full interactivity
+    const eventTypes = [
+      'click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout',
+      'keydown', 'keyup', 'keypress', 'input', 'change', 'submit', 'focus', 'blur'
+    ];
+    
+    eventTypes.forEach(eventType => {
+      const handler = (e) => this.handleFrameEvent(e, eventType);
+      iframeDoc.addEventListener(eventType, handler, true);
+      
+      // Store for cleanup
+      if (!this.eventListeners.has(iframeDoc)) {
+        this.eventListeners.set(iframeDoc, []);
+      }
+      this.eventListeners.get(iframeDoc).push({ type: eventType, handler });
+    });
+    
+    // Special handling for form submissions
+    const forms = clonedElement.querySelectorAll('form');
+    forms.forEach(form => {
+      form.addEventListener('submit', (e) => {
         e.preventDefault();
-        try {
-          window.open(e.target.href, '_blank', 'noopener,noreferrer');
-        } catch (error) {
-          console.error('Error opening link:', error);
+        this.syncFormSubmission(form, e);
+      });
+    });
+    
+    // Handle link clicks
+    const links = clonedElement.querySelectorAll('a[href]');
+    links.forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (link.href.startsWith('http')) {
+          window.open(link.href, '_blank', 'noopener,noreferrer');
+        } else {
+          // Handle relative links
+          window.location.href = link.href;
+        }
+      });
+    });
+  }
+
+  handleFrameEvent(e, eventType) {
+    // Sync events between PiP and main window
+    try {
+      const targetSelector = this.getElementSelector(e.target);
+      const originalTarget = document.querySelector(targetSelector);
+      
+      if (originalTarget && this.shouldSyncEvent(eventType, e)) {
+        // Create synthetic event for main window
+        const syntheticEvent = new Event(eventType, {
+          bubbles: e.bubbles,
+          cancelable: e.cancelable
+        });
+        
+        // Copy relevant properties
+        if (e.target.value !== undefined) {
+          originalTarget.value = e.target.value;
+        }
+        
+        // Dispatch to original element
+        originalTarget.dispatchEvent(syntheticEvent);
+        
+        // Update state
+        this.stateManager.setState(`${targetSelector}_${eventType}`, {
+          value: e.target.value,
+          checked: e.target.checked,
+          selectedIndex: e.target.selectedIndex,
+          timestamp: Date.now()
+        });
+      }
+    } catch (error) {
+      console.warn('Event sync error:', error);
+    }
+  }
+
+  shouldSyncEvent(eventType, event) {
+    // Determine which events should be synced
+    const syncableEvents = ['input', 'change', 'click'];
+    const syncableElements = ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'];
+    
+    return syncableEvents.includes(eventType) && 
+           syncableElements.includes(event.target.tagName);
+  }
+
+  getElementSelector(element) {
+    // Generate a unique selector for the element
+    if (element.id) {
+      return `#${element.id}`;
+    }
+    
+    if (element.className) {
+      const classes = element.className.split(' ').filter(c => c.trim());
+      if (classes.length > 0) {
+        return `${element.tagName.toLowerCase()}.${classes.join('.')}`;
+      }
+    }
+    
+    // Fallback to nth-child selector
+    const parent = element.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children);
+      const index = siblings.indexOf(element) + 1;
+      return `${this.getElementSelector(parent)} > ${element.tagName.toLowerCase()}:nth-child(${index})`;
+    }
+    
+    return element.tagName.toLowerCase();
+  }
+
+  setupFrameEventBridge(iframe) {
+    // Create bidirectional communication bridge
+    const iframeWindow = iframe.contentWindow;
+    
+    // Listen for messages from iframe
+    window.addEventListener('message', (e) => {
+      if (e.source === iframeWindow) {
+        this.handleFrameMessage(e.data);
+      }
+    });
+    
+    // Send initial state to iframe
+    iframeWindow.postMessage({
+      type: 'pip-init',
+      state: Object.fromEntries(this.stateManager.state)
+    }, '*');
+  }
+
+  handleFrameMessage(data) {
+    switch (data.type) {
+      case 'pip-state-update':
+        this.stateManager.setState(data.key, data.value);
+        break;
+      case 'pip-resize-request':
+        this.resizePipWindow(data.width, data.height);
+        break;
+      case 'pip-focus-request':
+        this.pipWindow.focus();
+        break;
+    }
+  }
+
+  setupElementObservers() {
+    if (!this.originalElement) return;
+    
+    // Observe changes to the original element
+    this.mutationObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        this.syncMutation(mutation);
+      });
+    });
+    
+    this.mutationObserver.observe(this.originalElement, {
+      childList: true,
+      attributes: true,
+      characterData: true,
+      subtree: true
+    });
+    
+    // Observe size changes
+    if (window.ResizeObserver) {
+      this.resizeObserver = new ResizeObserver((entries) => {
+        entries.forEach((entry) => {
+          this.syncElementResize(entry);
+        });
+      });
+      
+      this.resizeObserver.observe(this.originalElement);
+    }
+  }
+
+  syncMutation(mutation) {
+    // Sync DOM changes from original to PiP
+    try {
+      const iframe = this.pipWindow?.querySelector('.pip-interactive-frame');
+      if (!iframe || !iframe.contentDocument) return;
+      
+      const targetSelector = this.getElementSelector(mutation.target);
+      const pipTarget = iframe.contentDocument.querySelector(targetSelector);
+      
+      if (pipTarget) {
+        switch (mutation.type) {
+          case 'attributes':
+            if (mutation.attributeName) {
+              const newValue = mutation.target.getAttribute(mutation.attributeName);
+              if (newValue !== null) {
+                pipTarget.setAttribute(mutation.attributeName, newValue);
+              } else {
+                pipTarget.removeAttribute(mutation.attributeName);
+              }
+            }
+            break;
+          case 'characterData':
+            pipTarget.textContent = mutation.target.textContent;
+            break;
+          case 'childList':
+            // Handle added/removed nodes
+            this.syncChildListChanges(mutation, pipTarget);
+            break;
         }
       }
-    };
-    
-    iframeDoc.addEventListener('click', handleClick);
-    
-    // Store reference for cleanup
-    this.eventListeners.set(iframeDoc, [
-      { type: 'click', handler: handleClick }
-    ]);
-  }
-  
-  createStaticContent(container) {
-    try {
-      const clone = this.selectedElement.cloneNode(true);
-      
-      // Apply basic styles to prevent layout issues
-      clone.style.cssText = `
-        max-width: 100%;
-        max-height: 100%;
-        overflow: auto;
-        box-sizing: border-box;
-      `;
-      
-      // Copy essential computed styles
-      this.copyEssentialStyles(this.selectedElement, clone);
-      
-      container.appendChild(clone);
     } catch (error) {
-      console.error('Error creating static content:', error);
-      container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">Content could not be loaded</div>';
-    } finally {
-      this.isCreatingPip = false;
+      console.warn('Mutation sync error:', error);
     }
   }
-  
-  fallbackToStaticContent(container, iframe) {
-    console.warn('Falling back to static content due to iframe issues');
-    if (iframe && iframe.parentNode) {
-      iframe.parentNode.removeChild(iframe);
-    }
-    this.createStaticContent(container);
+
+  syncChildListChanges(mutation, pipTarget) {
+    // Sync child node changes
+    mutation.removedNodes.forEach((node, index) => {
+      if (pipTarget.children[index]) {
+        pipTarget.children[index].remove();
+      }
+    });
+    
+    mutation.addedNodes.forEach((node, index) => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const clonedNode = node.cloneNode(true);
+        const insertIndex = Array.from(mutation.target.children).indexOf(node);
+        
+        if (insertIndex >= 0 && insertIndex < pipTarget.children.length) {
+          pipTarget.insertBefore(clonedNode, pipTarget.children[insertIndex]);
+        } else {
+          pipTarget.appendChild(clonedNode);
+        }
+      }
+    });
   }
-  
+
+  syncElementResize(entry) {
+    // Sync size changes to PiP
+    const iframe = this.pipWindow?.querySelector('.pip-interactive-frame');
+    if (!iframe || !iframe.contentDocument) return;
+    
+    const pipContent = iframe.contentDocument.getElementById('pip-content-root');
+    if (pipContent) {
+      const { width, height } = entry.contentRect;
+      pipContent.style.width = `${width}px`;
+      pipContent.style.height = `${height}px`;
+    }
+  }
+
+  applyResponsiveScaling() {
+    // Apply responsive scaling based on PiP window size
+    const pipRect = this.pipWindow.getBoundingClientRect();
+    const scaleFactor = Math.min(1, Math.min(pipRect.width / 800, pipRect.height / 600));
+    
+    const iframe = this.pipWindow.querySelector('.pip-interactive-frame');
+    if (iframe && iframe.contentDocument) {
+      const responsiveElement = iframe.contentDocument.querySelector('.pip-responsive');
+      if (responsiveElement) {
+        responsiveElement.style.transform = `scale(${scaleFactor})`;
+      }
+    }
+  }
+
   copyComputedStyles(sourceElement, targetElement, targetWindow = window) {
     try {
       const sourceStyles = window.getComputedStyle(sourceElement);
@@ -470,7 +716,8 @@ class InteractivePiP {
         'display', 'position', 'width', 'height', 'min-width', 'min-height',
         'max-width', 'max-height', 'margin', 'padding', 'border', 'border-radius',
         'background', 'background-color', 'color', 'font-family', 'font-size',
-        'font-weight', 'line-height', 'text-align', 'opacity', 'visibility'
+        'font-weight', 'line-height', 'text-align', 'opacity', 'visibility',
+        'flex-direction', 'justify-content', 'align-items', 'flex-wrap'
       ];
       
       importantProps.forEach(prop => {
@@ -487,9 +734,8 @@ class InteractivePiP {
       // Recursively copy styles for children (limited depth)
       const sourceChildren = sourceElement.children;
       const targetChildren = targetElement.children;
-      const maxDepth = 5; // Prevent deep recursion
       
-      if (sourceChildren.length <= 50) { // Limit child processing
+      if (sourceChildren.length <= 20) { // Limit for performance
         for (let i = 0; i < Math.min(sourceChildren.length, targetChildren.length); i++) {
           this.copyComputedStyles(sourceChildren[i], targetChildren[i], targetWindow);
         }
@@ -498,12 +744,81 @@ class InteractivePiP {
       console.warn('Error copying computed styles:', error);
     }
   }
-  
+
+  createStaticContent(container) {
+    try {
+      const clone = this.selectedElement.cloneNode(true);
+      
+      // Apply responsive wrapper
+      const wrapper = document.createElement('div');
+      wrapper.className = 'pip-static-wrapper';
+      wrapper.style.cssText = `
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        transform-origin: top left;
+        transition: transform 0.2s ease;
+      `;
+      
+      clone.style.cssText = `
+        max-width: 100%;
+        max-height: 100%;
+        box-sizing: border-box;
+      `;
+      
+      this.copyEssentialStyles(this.selectedElement, clone);
+      wrapper.appendChild(clone);
+      container.appendChild(wrapper);
+      
+      // Apply scaling for static content
+      this.applyStaticScaling(wrapper);
+      
+    } catch (error) {
+      console.error('Error creating static content:', error);
+      this.createFallbackContent(container);
+    }
+  }
+
+  applyStaticScaling(wrapper) {
+    const pipRect = this.pipWindow.getBoundingClientRect();
+    const scaleFactor = Math.min(1, Math.min(pipRect.width / 600, pipRect.height / 400));
+    wrapper.style.transform = `scale(${scaleFactor})`;
+  }
+
+  createFallbackContent(container) {
+    container.innerHTML = `
+      <div style="
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        padding: 20px;
+        text-align: center;
+        color: #666;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      ">
+        <div>
+          <div style="font-size: 48px; margin-bottom: 16px;">📺</div>
+          <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px;">Content Unavailable</div>
+          <div style="font-size: 14px;">The selected content could not be displayed in PiP mode.</div>
+        </div>
+      </div>
+    `;
+  }
+
+  fallbackToStaticContent(container, iframe) {
+    console.warn('Falling back to static content due to iframe issues');
+    if (iframe && iframe.parentNode) {
+      iframe.parentNode.removeChild(iframe);
+    }
+    this.createStaticContent(container);
+  }
+
   copyEssentialStyles(source, target) {
     const computedStyles = window.getComputedStyle(source);
     const essentialProps = [
       'color', 'background-color', 'font-family', 'font-size', 'font-weight',
-      'line-height', 'text-align', 'border', 'border-radius', 'padding'
+      'line-height', 'text-align', 'border', 'border-radius', 'padding', 'margin'
     ];
     
     essentialProps.forEach(prop => {
@@ -522,7 +837,7 @@ class InteractivePiP {
   }
 
   bindPipEvents(header, resizeHandle) {
-    // Dragging
+    // Enhanced dragging with smooth movement
     header.addEventListener('mousedown', (e) => {
       if (e.target.classList.contains('pip-control-btn')) return;
       
@@ -531,17 +846,29 @@ class InteractivePiP {
       this.dragOffset.x = e.clientX - rect.left;
       this.dragOffset.y = e.clientY - rect.top;
       
+      // Add dragging class for visual feedback
+      this.pipWindow.classList.add('pip-dragging');
+      
       document.addEventListener('mousemove', this.handleDrag);
       document.addEventListener('mouseup', this.handleDragEnd);
       e.preventDefault();
     });
     
-    // Resizing
+    // Enhanced resizing with constraints
     resizeHandle.addEventListener('mousedown', (e) => {
       this.isResizing = true;
+      this.pipWindow.classList.add('pip-resizing');
+      
       document.addEventListener('mousemove', this.handleResize);
       document.addEventListener('mouseup', this.handleResizeEnd);
       e.preventDefault();
+    });
+    
+    // Double-click header to toggle maximize
+    header.addEventListener('dblclick', (e) => {
+      if (!e.target.classList.contains('pip-control-btn')) {
+        this.toggleMaximize();
+      }
     });
   }
 
@@ -551,17 +878,23 @@ class InteractivePiP {
     const x = e.clientX - this.dragOffset.x;
     const y = e.clientY - this.dragOffset.y;
     
-    // Keep window within viewport
-    const maxX = window.innerWidth - this.pipWindow.offsetWidth;
-    const maxY = window.innerHeight - this.pipWindow.offsetHeight;
+    // Enhanced viewport constraints with margin
+    const margin = 10;
+    const maxX = window.innerWidth - this.pipWindow.offsetWidth - margin;
+    const maxY = window.innerHeight - this.pipWindow.offsetHeight - margin;
     
-    this.pipWindow.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
-    this.pipWindow.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+    const constrainedX = Math.max(margin, Math.min(x, maxX));
+    const constrainedY = Math.max(margin, Math.min(y, maxY));
+    
+    this.pipWindow.style.left = constrainedX + 'px';
+    this.pipWindow.style.top = constrainedY + 'px';
     this.pipWindow.style.right = 'auto';
+    this.pipWindow.style.bottom = 'auto';
   };
 
   handleDragEnd = () => {
     this.isDragging = false;
+    this.pipWindow.classList.remove('pip-dragging');
     document.removeEventListener('mousemove', this.handleDrag);
     document.removeEventListener('mouseup', this.handleDragEnd);
   };
@@ -573,12 +906,25 @@ class InteractivePiP {
     const width = e.clientX - rect.left;
     const height = e.clientY - rect.top;
     
-    this.pipWindow.style.width = Math.max(200, Math.min(width, window.innerWidth * 0.8)) + 'px';
-    this.pipWindow.style.height = Math.max(150, Math.min(height, window.innerHeight * 0.8)) + 'px';
+    // Enhanced size constraints
+    const minWidth = 250;
+    const minHeight = 200;
+    const maxWidth = window.innerWidth * 0.9;
+    const maxHeight = window.innerHeight * 0.9;
+    
+    const constrainedWidth = Math.max(minWidth, Math.min(width, maxWidth));
+    const constrainedHeight = Math.max(minHeight, Math.min(height, maxHeight));
+    
+    this.pipWindow.style.width = constrainedWidth + 'px';
+    this.pipWindow.style.height = constrainedHeight + 'px';
+    
+    // Apply responsive scaling on resize
+    this.applyResponsiveScaling();
   };
 
   handleResizeEnd = () => {
     this.isResizing = false;
+    this.pipWindow.classList.remove('pip-resizing');
     document.removeEventListener('mousemove', this.handleResize);
     document.removeEventListener('mouseup', this.handleResizeEnd);
   };
@@ -586,48 +932,100 @@ class InteractivePiP {
   toggleMinimize() {
     this.isMinimized = !this.isMinimized;
     this.pipWindow.classList.toggle('minimized', this.isMinimized);
+    
+    if (this.isMinimized) {
+      this.pipWindow.style.height = '40px';
+      this.pipWindow.style.resize = 'none';
+    } else {
+      this.pipWindow.style.height = '300px';
+      this.pipWindow.style.resize = 'both';
+    }
   }
 
   toggleMaximize() {
-    const isMaximized = this.pipWindow.style.width === '80vw';
+    const isMaximized = this.pipWindow.classList.contains('maximized');
     
     if (isMaximized) {
+      // Restore to previous size
+      this.pipWindow.classList.remove('maximized');
       this.pipWindow.style.width = '400px';
       this.pipWindow.style.height = '300px';
       this.pipWindow.style.top = '20px';
       this.pipWindow.style.right = '20px';
       this.pipWindow.style.left = 'auto';
+      this.pipWindow.style.bottom = 'auto';
     } else {
-      this.pipWindow.style.width = '80vw';
-      this.pipWindow.style.height = '80vh';
-      this.pipWindow.style.top = '10vh';
-      this.pipWindow.style.left = '10vw';
+      // Maximize
+      this.pipWindow.classList.add('maximized');
+      this.pipWindow.style.width = '90vw';
+      this.pipWindow.style.height = '90vh';
+      this.pipWindow.style.top = '5vh';
+      this.pipWindow.style.left = '5vw';
       this.pipWindow.style.right = 'auto';
+      this.pipWindow.style.bottom = 'auto';
+    }
+    
+    // Reapply scaling after size change
+    setTimeout(() => this.applyResponsiveScaling(), 100);
+  }
+
+  toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      this.pipWindow.requestFullscreen().catch(err => {
+        console.warn('Could not enter fullscreen:', err);
+      });
+    }
+  }
+
+  resizePipWindow(width, height) {
+    if (this.pipWindow) {
+      this.pipWindow.style.width = width + 'px';
+      this.pipWindow.style.height = height + 'px';
+      this.applyResponsiveScaling();
     }
   }
 
   closePip() {
     if (this.pipWindow) {
-      // Clean up event listeners to prevent memory leaks
+      // Clean up observers
+      if (this.mutationObserver) {
+        this.mutationObserver.disconnect();
+        this.mutationObserver = null;
+      }
+      
+      if (this.resizeObserver) {
+        this.resizeObserver.disconnect();
+        this.resizeObserver = null;
+      }
+      
+      // Clean up event listeners
       this.cleanupEventListeners();
       
-      // Clear any pending timeouts
+      // Clear timeouts
       if (this.loadTimeout) {
         clearTimeout(this.loadTimeout);
         this.loadTimeout = null;
       }
       
-      // Reset creation flag
+      // Reset flags
       this.isCreatingPip = false;
       
-      this.pipWindow.style.animation = 'pip-window-exit 0.2s ease-out';
+      // Animate close
+      this.pipWindow.style.animation = 'pip-window-exit 0.3s ease-out';
+      
       setTimeout(() => {
         if (this.pipWindow) {
           this.pipWindow.remove();
           this.pipWindow = null;
           this.selectedElement = null;
+          this.originalElement = null;
         }
-      }, 200);
+      }, 300);
+      
+      // Notify background script
+      chrome.runtime.sendMessage({ action: 'pipClosed' });
     }
   }
   
@@ -648,8 +1046,8 @@ class InteractivePiP {
 // Initialize the extension
 const interactivePiP = new InteractivePiP();
 
-// Add exit animation
-const exitAnimation = `
+// Add enhanced CSS animations
+const enhancedStyles = `
   @keyframes pip-window-exit {
     0% {
       transform: scale(1) translateY(0);
@@ -660,8 +1058,21 @@ const exitAnimation = `
       opacity: 0;
     }
   }
+  
+  .pip-dragging {
+    cursor: grabbing !important;
+    user-select: none !important;
+  }
+  
+  .pip-resizing {
+    user-select: none !important;
+  }
+  
+  .pip-window.maximized {
+    border-radius: 0 !important;
+  }
 `;
 
 const style = document.createElement('style');
-style.textContent = exitAnimation;
+style.textContent = enhancedStyles;
 document.head.appendChild(style);
