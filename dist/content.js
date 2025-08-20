@@ -203,10 +203,15 @@ class InteractivePiP {
       this.closePip();
     }
 
+    // Generate unique persistence ID
+    this.persistenceId = 'pip-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
     this.isPersistentPip = true;
+    
     this.pipWindow = document.createElement('div');
     this.pipWindow.className = 'pip-window';
     this.pipWindow.id = 'persistent-pip-window';
+    this.pipWindow.setAttribute('data-pip-persistent', 'true');
+    this.pipWindow.setAttribute('data-pip-id', this.persistenceId);
     
     // Create header with enhanced controls
     const header = document.createElement('div');

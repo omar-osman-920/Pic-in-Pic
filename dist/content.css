@@ -59,28 +59,58 @@
 
 /* Persistent PiP specific styles */
 #persistent-pip-window {
-  /* Force the PiP to stay visible across all contexts */
+  /* Enhanced persistence - force visibility across all contexts */
   position: fixed !important;
   z-index: 2147483647 !important;
-  /* Prevent any parent elements from hiding it */
+  /* GPU acceleration for better performance */
   transform: translateZ(0) !important;
   will-change: transform !important;
-  /* Ensure it's always interactive */
+  /* Force visibility and interactivity */
   pointer-events: auto !important;
   user-select: none !important;
+  /* Prevent any hiding or clipping */
+  clip: auto !important;
+  clip-path: none !important;
+  mask: none !important;
+  filter: none !important;
+  /* Ensure it's always on top */
+  isolation: isolate !important;
+  contain: none !important;
 }
 
-/* Override any potential hiding styles */
-#persistent-pip-window,
-#persistent-pip-window * {
+/* Force visibility for all PiP elements */
+[data-pip-persistent="true"],
+[data-pip-persistent="true"] * {
   visibility: visible !important;
   opacity: 1 !important;
-  display: block !important;
+  display: initial !important;
+  /* Prevent any transformations that could hide content */
+  transform: none !important;
+  /* Ensure proper stacking */
+  z-index: inherit !important;
 }
 
-#persistent-pip-window .pip-content,
-#persistent-pip-window .pip-content * {
+/* Specific overrides for content areas */
+[data-pip-persistent="true"] .pip-content,
+[data-pip-persistent="true"] .pip-content * {
   display: initial !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Enhanced cross-tab persistence */
+.pip-window[data-pip-persistent="true"] {
+  /* Force positioning relative to viewport, not page */
+  position: fixed !important;
+  /* Prevent any parent container from affecting positioning */
+  top: var(--pip-top, 20px) !important;
+  left: var(--pip-left, auto) !important;
+  right: var(--pip-right, 20px) !important;
+  bottom: var(--pip-bottom, auto) !important;
+  /* Ensure it's always rendered */
+  content-visibility: visible !important;
+  /* Prevent any layout shifts */
+  contain: none !important;
 }
 
 /* Enhanced window states */
