@@ -208,30 +208,63 @@ class InteractivePiP {
       iframe.style.height = '100%';
       iframe.style.border = 'none';
       
-      // Create a minimal HTML document with the element
-      const elementHTML = this.selectedElement.outerHTML;
-      const styles = this.extractElementStyles(this.selectedElement);
-      
-      const iframeContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <style>
-            body { margin: 0; padding: 10px; font-family: inherit; }
-            ${styles}
-          </style>
-        </head>
-        <body>
-          ${elementHTML}
-        </body>
-        </html>
-      `;
-      
       iframe.onload = () => {
-        iframe.contentDocument.open();
-        iframe.contentDocument.write(iframeContent);
-        iframe.contentDocument.close();
+        const iframeDoc = iframe.contentDocument;
+        const iframeWindow = iframe.contentWindow;
+        
+        // Copy all stylesheets from parent document
+        const parentStyleSheets = Array.from(document.styleSheets);
+        parentStyleSheets.forEach(styleSheet => {
+          try {
+            if (styleSheet.href) {
+              // External stylesheet
+              const link = iframeDoc.createElement('link');
+              link.rel = 'stylesheet';
+              link.href = styleSheet.href;
+              iframeDoc.head.appendChild(link);
+            } else if (styleSheet.cssRules) {
+              // Inline stylesheet
+              const style = iframeDoc.createElement('style');
+              Array.from(styleSheet.cssRules).forEach(rule => {
+                style.textContent += rule.cssText + '\n';
+              });
+              iframeDoc.head.appendChild(style);
+            }
+          } catch (e) {
+            // Handle CORS issues with external stylesheets
+            console.log('Could not copy stylesheet:', e);
+          }
+        });
+        
+        // Add base styles for proper rendering
+        const baseStyle = iframeDoc.createElement('style');
+        baseStyle.textContent = `
+          body { 
+            margin: 0; 
+            padding: 10px; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: white;
+          }
+          * { box-sizing: border-box; }
+        `;
+        iframeDoc.head.appendChild(baseStyle);
+        
+        // Clone the selected element properly
+        const clonedElement = this.selectedElement.cloneNode(true);
+        
+        // Copy computed styles to the cloned element and its children
+        this.copyComputedStyles(this.selectedElement, clonedElement, iframeWindow);
+        
+        // Add the cloned element to iframe body
+        iframeDoc.body.appendChild(clonedElement);
+        
+        // Handle link clicks
+        iframeDoc.addEventListener('click', (e) => {
+          if (e.target.tagName === 'A' && e.target.href) {
+            e.preventDefault();
+            window.open(e.target.href, '_blank');
+          }
+        });
         
         // Add event listener after document is loaded to avoid CSP issues
         iframe.contentDocument.addEventListener('click', function(e) {
@@ -242,29 +275,51 @@ class InteractivePiP {
         });
       };
       
+      // Set iframe src to about:blank to initialize
+      iframe.src = 'about:blank';
       container.appendChild(iframe);
     } else {
       // Simple clone without interactivity
       const clone = this.selectedElement.cloneNode(true);
+      
+      // Copy inline styles for non-interactive mode
+      this.copyComputedStyles(this.selectedElement, clone);
       container.appendChild(clone);
     }
   }
 
-  extractElementStyles(element) {
-    const computedStyles = window.getComputedStyle(element);
-    const styles = [];
+  copyComputedStyles(sourceElement, targetElement, targetWindow = window) {
+    const sourceStyles = window.getComputedStyle(sourceElement);
     
-    // Extract important styles
-    const importantProperties = [
-      'color', 'background-color', 'font-family', 'font-size', 'font-weight',
-      'line-height', 'text-align', 'border', 'border-radius', 'padding',
-      'margin', 'display', 'flex-direction', 'justify-content', 'align-items'
+    // Important style properties to copy
+    const importantProps = [
+      'display', 'position', 'top', 'left', 'right', 'bottom',
+      'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+      'margin', 'padding', 'border', 'border-radius',
+      'background', 'background-color', 'background-image', 'background-size', 'background-position',
+      'color', 'font-family', 'font-size', 'font-weight', 'font-style',
+      'line-height', 'text-align', 'text-decoration', 'text-transform',
+      'opacity', 'visibility', 'overflow', 'z-index',
+      'flex', 'flex-direction', 'flex-wrap', 'justify-content', 'align-items',
+      'grid', 'grid-template-columns', 'grid-template-rows', 'grid-gap'
     ];
     
-    importantProperties.forEach(prop => {
-      const value = computedStyles.getPropertyValue(prop);
-      if (value) {
-        styles.push(`${prop}: ${value};`);
+    // Copy styles to target element
+    importantProps.forEach(prop => {
+      const value = sourceStyles.getPropertyValue(prop);
+      if (value && value !== 'auto' && value !== 'normal') {
+        targetElement.style.setProperty(prop, value);
+      }
+    });
+    
+    // Recursively copy styles for child elements
+    const sourceChildren = sourceElement.children;
+    const targetChildren = targetElement.children;
+    
+    for (let i = 0; i < sourceChildren.length && i < targetChildren.length; i++) {
+      this.copyComputedStyles(sourceChildren[i], targetChildren[i], targetWindow);
+    }
+  }
       }
     });
     
