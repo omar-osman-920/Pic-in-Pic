@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive PiP</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+          <rect x="8" y="21" width="8" height="2" rx="1" ry="1"/>
+          <rect x="12" y="17" width="4" height="4"/>
+        </svg>
+      </div>
+      <h1>Interactive PiP</h1>
+    </div>
+    
+    <div class="content">
+      <p class="description">Select any element on the page to create an interactive floating window</p>
+      
+      <div class="controls">
+        <button id="toggleSelection" class="btn-primary">
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 9l-4-4m0 0v3m0-3h3M15 15l4 4m0 0v-3m0 3h-3M9 15l-4 4m0 0v-3m0-3h3M15 9l4-4m0 0v3m0-3h-3"/>
+            </svg>
+          </span>
+          Start Selection
+        </button>
+        
+        <button id="closePip" class="btn-secondary" disabled>
+          <span class="btn-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </span>
+          Close PiP
+        </button>
+      </div>
+      
+      <div class="status" id="status">
+        <div class="status-indicator"></div>
+        <span>Ready to select</span>
+      </div>
+    </div>
+    
+    <div class="footer">
+      <div class="settings">
+        <label class="checkbox-container">
+          <input type="checkbox" id="maintainInteractivity" checked>
+          <span class="checkmark"></span>
+          Maintain interactivity
+        </label>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
