@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Interactive Picture-in-Picture",
+  "version": "1.0.0",
+  "description": "Convert any selected element into an interactive floating picture-in-picture window",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Interactive Picture-in-Picture"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["pip-window.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
