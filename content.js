@@ -26,7 +26,8 @@ class InteractivePiP {
     this.createOverlay();
     this.bindEvents();
     this.loadSettings();
-    this.setupStateSync();
+    this.setupPersistenceHandlers();
+    this.registerWithBackground();
     this.checkForExistingPip();
   }
   
