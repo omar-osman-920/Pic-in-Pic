@@ -355,29 +355,29 @@ class InteractivePiP {
             overflow: auto;
           }
           
-          /* PiP-specific responsive styles */
-          .pip-responsive {
+          /* Enhanced PiP-specific responsive styles */
+          .pip-live-content {
             transform-origin: top left;
-            transition: transform 0.2s ease;
+            transition: transform 0.1s ease;
+            position: relative;
+            width: 100%;
+            height: 100%;
           }
           
-          /* Scale down for PiP mode */
-          @media (max-width: 600px) {
-            .pip-responsive {
-              transform: scale(0.8);
-            }
+          /* Live update animations */
+          .pip-live-content.updating {
+            opacity: 0.9;
           }
           
-          @media (max-width: 400px) {
-            .pip-responsive {
-              transform: scale(0.6);
-            }
+          .pip-live-content.updated {
+            opacity: 1;
           }
           
           /* Ensure interactive elements remain clickable */
           button, input, select, textarea, a {
             pointer-events: auto !important;
             cursor: pointer !important;
+            transition: all 0.1s ease !important;
           }
           
           /* Enhanced visibility for small screens */
@@ -386,10 +386,29 @@ class InteractivePiP {
             min-width: 32px !important;
             font-size: 14px !important;
           }
+          
+          /* Live content indicators */
+          .pip-live-indicator {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            width: 8px;
+            height: 8px;
+            background: #00ff00;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            z-index: 1000;
+          }
+          
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
         </style>
       </head>
       <body>
-        <div class="pip-responsive" id="pip-content-root"></div>
+        <div class="pip-live-indicator" title="Live Content"></div>
+        <div class="pip-live-content" id="pip-content-root"></div>
       </body>
       </html>
     `);
@@ -402,16 +421,58 @@ class InteractivePiP {
     const contentRoot = iframeDoc.getElementById('pip-content-root');
     const clonedElement = this.selectedElement.cloneNode(true);
     
+    // Mark as PiP element and assign tracking ID
+    clonedElement.setAttribute('data-pip-element', 'true');
+    this.assignPipIds(clonedElement);
+    
     // Apply computed styles to maintain appearance
     this.copyComputedStyles(this.selectedElement, clonedElement, iframeWindow);
     
-    // Make element responsive for PiP
-    clonedElement.classList.add('pip-responsive');
+    // Make element live-responsive for PiP
+    clonedElement.classList.add('pip-live-content');
     
     contentRoot.appendChild(clonedElement);
     
-    // Setup interactive event handling
+    // Setup enhanced interactive event handling
     this.setupInteractiveEvents(iframeDoc, clonedElement);
+    
+    // Initialize live content synchronization
+    this.initializeLiveSync(clonedElement);
+  }
+  
+  initializeLiveSync(pipElement) {
+    // Initialize bidirectional synchronization
+    this.attachEventListenersToElement(pipElement);
+    
+    // Start live content monitoring
+    this.startLiveMonitoring(pipElement);
+  }
+  
+  startLiveMonitoring(pipElement) {
+    // Enhanced monitoring for live updates
+    const monitoringInterval = setInterval(() => {
+      if (!this.pipWindow || !this.originalElement) {
+        clearInterval(monitoringInterval);
+        return;
+      }
+      
+      // Add visual feedback for updates
+      pipElement.classList.add('updating');
+      
+      // Perform live sync
+      this.syncLiveContent();
+      
+      // Remove visual feedback
+      setTimeout(() => {
+        pipElement.classList.remove('updating');
+        pipElement.classList.add('updated');
+        setTimeout(() => pipElement.classList.remove('updated'), 100);
+      }, 50);
+      
+    }, 100); // 10 FPS for smooth live updates
+    
+    // Store interval for cleanup
+    this.liveMonitoringInterval = monitoringInterval;
   }
 
   copyAllStylesheets(iframeDoc) {
@@ -598,10 +659,11 @@ class InteractivePiP {
   setupElementObservers() {
     if (!this.originalElement) return;
     
-    // Observe changes to the original element
+    // Enhanced mutation observer for live synchronization
     this.mutationObserver = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
-        this.syncMutation(mutation);
+        // Immediate synchronization for live updates
+        this.syncMutationLive(mutation);
       });
     });
     
@@ -609,29 +671,91 @@ class InteractivePiP {
       childList: true,
       attributes: true,
       characterData: true,
-      subtree: true
+      subtree: true,
+      attributeOldValue: true,
+      characterDataOldValue: true
     });
     
-    // Observe size changes
+    // Enhanced resize observer for live scaling
     if (window.ResizeObserver) {
       this.resizeObserver = new ResizeObserver((entries) => {
         entries.forEach((entry) => {
-          this.syncElementResize(entry);
+          this.syncElementResizeLive(entry);
         });
       });
       
       this.resizeObserver.observe(this.originalElement);
     }
+    
+    // Add live content polling for dynamic content
+    this.setupLiveContentPolling();
+    
+    // Monitor scroll and viewport changes
+    this.setupViewportObserver();
   }
 
-  syncMutation(mutation) {
-    // Sync DOM changes from original to PiP
+  setupLiveContentPolling() {
+    // Poll for content changes that mutation observer might miss
+    this.contentPollingInterval = setInterval(() => {
+      if (!this.pipWindow || !this.originalElement) {
+        clearInterval(this.contentPollingInterval);
+        return;
+      }
+      
+      this.syncLiveContent();
+    }, 100); // 10 FPS for smooth updates
+  }
+  
+  setupViewportObserver() {
+    // Monitor viewport changes for responsive content
+    if (window.IntersectionObserver) {
+      this.intersectionObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.target === this.originalElement) {
+            this.syncVisibilityState(entry.isIntersecting);
+          }
+        });
+      });
+      
+      this.intersectionObserver.observe(this.originalElement);
+    }
+  }
+  
+  syncLiveContent() {
+    const iframe = this.pipWindow?.querySelector('.pip-interactive-frame');
+    if (!iframe || !iframe.contentDocument) return;
+    
+    const pipElement = iframe.contentDocument.querySelector('[data-pip-element]');
+    if (!pipElement) return;
+    
+    // Sync text content
+    if (this.originalElement.textContent !== pipElement.textContent) {
+      pipElement.textContent = this.originalElement.textContent;
+    }
+    
+    // Sync innerHTML for dynamic content (safely)
+    if (this.originalElement.innerHTML !== pipElement.innerHTML) {
+      try {
+        pipElement.innerHTML = this.originalElement.innerHTML;
+        this.reattachEventListeners(pipElement);
+      } catch (error) {
+        console.warn('Could not sync innerHTML:', error);
+      }
+    }
+    
+    // Sync computed styles for dynamic styling
+    this.syncComputedStylesLive(this.originalElement, pipElement);
+    
+    // Sync form values
+    this.syncFormValuesLive(this.originalElement, pipElement);
+  }
+  
+  syncMutationLive(mutation) {
     try {
       const iframe = this.pipWindow?.querySelector('.pip-interactive-frame');
       if (!iframe || !iframe.contentDocument) return;
       
-      const targetSelector = this.getElementSelector(mutation.target);
-      const pipTarget = iframe.contentDocument.querySelector(targetSelector);
+      const pipTarget = this.findPipElement(mutation.target, iframe.contentDocument);
       
       if (pipTarget) {
         switch (mutation.type) {
@@ -643,33 +767,71 @@ class InteractivePiP {
               } else {
                 pipTarget.removeAttribute(mutation.attributeName);
               }
+              
+              // Special handling for dynamic attributes
+              if (mutation.attributeName === 'class') {
+                this.syncClassChanges(mutation.target, pipTarget);
+              } else if (mutation.attributeName === 'style') {
+                this.syncStyleChanges(mutation.target, pipTarget);
+              }
             }
             break;
           case 'characterData':
             pipTarget.textContent = mutation.target.textContent;
             break;
           case 'childList':
-            // Handle added/removed nodes
-            this.syncChildListChanges(mutation, pipTarget);
+            // Enhanced child list synchronization
+            this.syncChildListChangesLive(mutation, pipTarget);
             break;
         }
+        
+        // Reattach event listeners after DOM changes
+        this.reattachEventListeners(pipTarget);
       }
     } catch (error) {
       console.warn('Mutation sync error:', error);
     }
   }
 
-  syncChildListChanges(mutation, pipTarget) {
-    // Sync child node changes
+  findPipElement(originalElement, pipDocument) {
+    // Enhanced element finding with multiple strategies
+    const elementId = originalElement.getAttribute('data-pip-id');
+    if (elementId) {
+      return pipDocument.querySelector(`[data-pip-id="${elementId}"]`);
+    }
+    
+    // Fallback to selector-based finding
+    const selector = this.getElementSelector(originalElement);
+    return pipDocument.querySelector(selector);
+  }
+  
+  syncClassChanges(originalElement, pipElement) {
+    // Sync class list changes
+    pipElement.className = originalElement.className;
+  }
+  
+  syncStyleChanges(originalElement, pipElement) {
+    // Sync inline style changes
+    pipElement.style.cssText = originalElement.style.cssText;
+  }
+  
+  syncChildListChangesLive(mutation, pipTarget) {
+    // Enhanced child node synchronization
     mutation.removedNodes.forEach((node, index) => {
-      if (pipTarget.children[index]) {
-        pipTarget.children[index].remove();
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const pipNode = this.findPipElement(node, pipTarget.ownerDocument);
+        if (pipNode) {
+          pipNode.remove();
+        }
       }
     });
     
     mutation.addedNodes.forEach((node, index) => {
       if (node.nodeType === Node.ELEMENT_NODE) {
         const clonedNode = node.cloneNode(true);
+        this.assignPipIds(clonedNode);
+        this.copyComputedStyles(node, clonedNode);
+        
         const insertIndex = Array.from(mutation.target.children).indexOf(node);
         
         if (insertIndex >= 0 && insertIndex < pipTarget.children.length) {
@@ -677,33 +839,187 @@ class InteractivePiP {
         } else {
           pipTarget.appendChild(clonedNode);
         }
+        
+        // Attach event listeners to new elements
+        this.attachEventListenersToElement(clonedNode);
       }
     });
   }
 
-  syncElementResize(entry) {
-    // Sync size changes to PiP
+  assignPipIds(element) {
+    // Assign unique IDs for element tracking
+    if (!element.hasAttribute('data-pip-id')) {
+      element.setAttribute('data-pip-id', 'pip-' + Math.random().toString(36).substr(2, 9));
+    }
+    
+    // Recursively assign IDs to children
+    Array.from(element.children).forEach(child => {
+      this.assignPipIds(child);
+    });
+  }
+  
+  syncComputedStylesLive(originalElement, pipElement) {
+    // Live synchronization of computed styles
+    const originalStyles = window.getComputedStyle(originalElement);
+    const dynamicProps = [
+      'display', 'visibility', 'opacity', 'transform', 'background-color',
+      'color', 'border-color', 'width', 'height'
+    ];
+    
+    dynamicProps.forEach(prop => {
+      const value = originalStyles.getPropertyValue(prop);
+      if (value) {
+        pipElement.style.setProperty(prop, value);
+      }
+    });
+  }
+  
+  syncFormValuesLive(originalContainer, pipContainer) {
+    // Sync form input values in real-time
+    const originalInputs = originalContainer.querySelectorAll('input, select, textarea');
+    const pipInputs = pipContainer.querySelectorAll('input, select, textarea');
+    
+    originalInputs.forEach((originalInput, index) => {
+      const pipInput = pipInputs[index];
+      if (pipInput) {
+        if (originalInput.type === 'checkbox' || originalInput.type === 'radio') {
+          pipInput.checked = originalInput.checked;
+        } else {
+          pipInput.value = originalInput.value;
+        }
+        
+        if (originalInput.selectedIndex !== undefined) {
+          pipInput.selectedIndex = originalInput.selectedIndex;
+        }
+      }
+    });
+  }
+  
+  syncElementResizeLive(entry) {
+    // Enhanced size synchronization
     const iframe = this.pipWindow?.querySelector('.pip-interactive-frame');
     if (!iframe || !iframe.contentDocument) return;
     
-    const pipContent = iframe.contentDocument.getElementById('pip-content-root');
+    const pipContent = iframe.contentDocument.querySelector('[data-pip-element]');
     if (pipContent) {
       const { width, height } = entry.contentRect;
-      pipContent.style.width = `${width}px`;
-      pipContent.style.height = `${height}px`;
+      
+      // Apply responsive scaling
+      const scale = this.calculateOptimalScale(width, height);
+      pipContent.style.transform = `scale(${scale})`;
+      pipContent.style.transformOrigin = 'top left';
+      
+      // Update container dimensions
+      const container = pipContent.parentElement;
+      if (container) {
+        container.style.width = `${width * scale}px`;
+        container.style.height = `${height * scale}px`;
+      }
+    }
+  }
+  
+  calculateOptimalScale(originalWidth, originalHeight) {
+    const pipRect = this.pipWindow.getBoundingClientRect();
+    const availableWidth = pipRect.width - 40; // Account for padding
+    const availableHeight = pipRect.height - 76; // Account for header and padding
+    
+    const scaleX = availableWidth / originalWidth;
+    const scaleY = availableHeight / originalHeight;
+    
+    return Math.min(scaleX, scaleY, 1); // Never scale up
+  }
+  
+  syncVisibilityState(isVisible) {
+    // Handle visibility changes of the original element
+    const iframe = this.pipWindow?.querySelector('.pip-interactive-frame');
+    if (!iframe || !iframe.contentDocument) return;
+    
+    const pipElement = iframe.contentDocument.querySelector('[data-pip-element]');
+    if (pipElement) {
+      pipElement.style.opacity = isVisible ? '1' : '0.5';
+    }
+  }
+  
+  reattachEventListeners(element) {
+    // Reattach event listeners after DOM changes
+    this.attachEventListenersToElement(element);
+    
+    // Recursively reattach for children
+    Array.from(element.children).forEach(child => {
+      this.reattachEventListeners(child);
+    });
+  }
+  
+  attachEventListenersToElement(element) {
+    // Attach comprehensive event listeners for interactivity
+    const eventTypes = ['click', 'input', 'change', 'focus', 'blur'];
+    
+    eventTypes.forEach(eventType => {
+      element.addEventListener(eventType, (e) => {
+        this.handlePipElementEvent(e, eventType);
+      });
+    });
+  }
+  
+  handlePipElementEvent(e, eventType) {
+    // Handle events from PiP elements and sync to original
+    const pipElement = e.target;
+    const pipId = pipElement.getAttribute('data-pip-id');
+    
+    if (pipId) {
+      const originalElement = document.querySelector(`[data-pip-id="${pipId}"]`) || 
+                             this.findOriginalElement(pipElement);
+      
+      if (originalElement) {
+        // Sync the event to the original element
+        this.syncEventToOriginal(originalElement, e, eventType);
+      }
+    }
+  }
+  
+  findOriginalElement(pipElement) {
+    // Find corresponding original element using various strategies
+    const selector = this.getElementSelector(pipElement);
+    return this.originalElement.querySelector(selector);
+  }
+  
+  syncEventToOriginal(originalElement, pipEvent, eventType) {
+    // Sync PiP events back to original elements
+    try {
+      if (eventType === 'input' || eventType === 'change') {
+        if (pipEvent.target.value !== undefined) {
+          originalElement.value = pipEvent.target.value;
+        }
+        if (pipEvent.target.checked !== undefined) {
+          originalElement.checked = pipEvent.target.checked;
+        }
+      }
+      
+      // Dispatch synthetic event to original element
+      const syntheticEvent = new Event(eventType, {
+        bubbles: pipEvent.bubbles,
+        cancelable: pipEvent.cancelable
+      });
+      
+      originalElement.dispatchEvent(syntheticEvent);
+    } catch (error) {
+      console.warn('Error syncing event to original:', error);
     }
   }
 
   applyResponsiveScaling() {
-    // Apply responsive scaling based on PiP window size
+    // Enhanced responsive scaling for live content
     const pipRect = this.pipWindow.getBoundingClientRect();
-    const scaleFactor = Math.min(1, Math.min(pipRect.width / 800, pipRect.height / 600));
+    const originalRect = this.originalElement.getBoundingClientRect();
+    
+    const scaleFactor = this.calculateOptimalScale(originalRect.width, originalRect.height);
     
     const iframe = this.pipWindow.querySelector('.pip-interactive-frame');
     if (iframe && iframe.contentDocument) {
-      const responsiveElement = iframe.contentDocument.querySelector('.pip-responsive');
+      const responsiveElement = iframe.contentDocument.querySelector('.pip-live-content');
       if (responsiveElement) {
         responsiveElement.style.transform = `scale(${scaleFactor})`;
+        responsiveElement.style.transformOrigin = 'top left';
       }
     }
   }
@@ -1000,6 +1316,11 @@ class InteractivePiP {
         this.resizeObserver = null;
       }
       
+      if (this.intersectionObserver) {
+        this.intersectionObserver.disconnect();
+        this.intersectionObserver = null;
+      }
+      
       // Clean up event listeners
       this.cleanupEventListeners();
       
@@ -1007,6 +1328,17 @@ class InteractivePiP {
       if (this.loadTimeout) {
         clearTimeout(this.loadTimeout);
         this.loadTimeout = null;
+      }
+      
+      // Clear intervals
+      if (this.contentPollingInterval) {
+        clearInterval(this.contentPollingInterval);
+        this.contentPollingInterval = null;
+      }
+      
+      if (this.liveMonitoringInterval) {
+        clearInterval(this.liveMonitoringInterval);
+        this.liveMonitoringInterval = null;
       }
       
       // Reset flags
