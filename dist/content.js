@@ -2,7 +2,7 @@ class InteractivePiP {
   constructor() {
     this.isSelecting = false;
     this.pipWindow = null;
-    this.isPersistentPip = false;
+    this.isPersistentPip = true;
     this.selectedElement = null;
     this.overlay = null;
     this.highlight = null;
@@ -18,6 +18,12 @@ class InteractivePiP {
     this.originalElement = null;
     this.mutationObserver = null;
     this.resizeObserver = null;
+    this.persistenceId = null;
+    this.visibilityHandler = null;
+    this.focusHandler = null;
+    this.beforeUnloadHandler = null;
+    this.isTabVisible = true;
+    this.persistenceCheckInterval = null;
     
     this.init();
   }
@@ -28,6 +34,7 @@ class InteractivePiP {
     this.loadSettings();
     this.setupStateSync();
     this.checkForExistingPip();
+    this.setupPersistenceHandlers();
   }
   
   async checkForExistingPip() {
@@ -1417,6 +1424,16 @@ class InteractivePiP {
 
   closePip() {
     if (this.pipWindow) {
+      // Notify background script before closing
+      if (this.persistenceId) {
+        chrome.runtime.sendMessage({
+          action: 'pipClosed',
+          persistenceId: this.persistenceId
+        }).catch(() => {
+          // Ignore errors during close
+        });
+      }
+      
       // Clean up observers
       if (this.mutationObserver) {
         this.mutationObserver.disconnect();
@@ -1436,6 +1453,9 @@ class InteractivePiP {
       // Clean up event listeners
       this.cleanupEventListeners();
       
+      // Clean up persistence handlers
+      this.cleanupPersistenceHandlers();
+      
       // Clear timeouts
       if (this.loadTimeout) {
         clearTimeout(this.loadTimeout);
@@ -1453,8 +1473,14 @@ class InteractivePiP {
         this.liveMonitoringInterval = null;
       }
       
+      if (this.persistenceCheckInterval) {
+        clearInterval(this.persistenceCheckInterval);
+        this.persistenceCheckInterval = null;
+      }
+      
       // Reset flags
       this.isCreatingPip = false;
+      this.persistenceId = null;
       
       // Animate close
       this.pipWindow.style.animation = 'pip-window-exit 0.3s ease-out';
@@ -1467,9 +1493,25 @@ class InteractivePiP {
           this.originalElement = null;
         }
       }, 300);
-      
-      // Notify background script
-      chrome.runtime.sendMessage({ action: 'pipClosed' });
+    }
+  }
+  
+  cleanupPersistenceHandlers() {
+    // Remove all persistence event listeners
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+    
+    if (this.focusHandler) {
+      window.removeEventListener('blur', this.focusHandler);
+      window.removeEventListener('focus', this.focusHandler);
+      this.focusHandler = null;
+    }
+    
+    if (this.beforeUnloadHandler) {
+      window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+      this.beforeUnloadHandler = null;
     }
   }
   

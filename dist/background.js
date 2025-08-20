@@ -161,11 +161,27 @@ async function injectPipIntoTab(tabId) {
     // Check if tab is valid and accessible
     const tab = await chrome.tabs.get(tabId);
     if (!tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
-      // Inject content script if needed
-      await chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        files: ['content.js']
-      });
+      // Wait for tab to be ready
+      if (tab.status !== 'complete') {
+        await waitForTabComplete(tabId);
+      }
+      
+      try {
+        // Inject content script if needed
+        await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          files: ['content.js']
+        });
+        
+        // Inject CSS
+        await chrome.scripting.insertCSS({
+          target: { tabId: tabId },
+          files: ['content.css']
+        });
+      } catch (injectionError) {
+        // Script might already be injected
+        console.log('Script injection skipped (likely already injected):', injectionError.message);
+      }
       
       // Restore PiP window
       await chrome.tabs.sendMessage(tabId, {
@@ -175,7 +191,28 @@ async function injectPipIntoTab(tabId) {
     }
   } catch (error) {
     console.log('Could not inject PiP into tab:', error);
+    throw error; // Re-throw for retry mechanism
   }
+}
+
+// Wait for tab to complete loading
+function waitForTabComplete(tabId, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error('Tab loading timeout'));
+    }, timeout);
+
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timeoutId);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
 }
 
 // Handle extension icon click
@@ -197,20 +234,99 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-// Handle messages from content scripts
+// Enhanced message handling with comprehensive state management
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'pipCreated') {
-    // Update global PiP state
+    // Update global PiP state with enhanced information
     globalPipState.isActive = true;
     globalPipState.sourceTabId = sender.tab.id;
     globalPipState.content = request.content;
     globalPipState.position = request.position || globalPipState.position;
     globalPipState.size = request.size || globalPipState.size;
+    globalPipState.elementSelector = request.elementSelector;
+    globalPipState.originalUrl = sender.tab.url;
+
+    // Mark source tab as PiP capable
+    pipCapableTabs.add(sender.tab.id);
+
+    // Update badge to show PiP is active across all tabs
+    updateBadgeForAllTabs('●', '#007bff');
+
+    // Store state persistently
+    chrome.storage.local.set({ globalPipState });
+
+    sendResponse({ success: true, state: globalPipState });
     
-    // Update badge to show PiP is active
+  } else if (request.action === 'pipClosed') {
+    // Clear global PiP state
+    globalPipState.isActive = false;
+    globalPipState.content = null;
+    globalPipState.sourceTabId = null;
+    globalPipState.elementSelector = null;
+    globalPipState.originalUrl = null;
+
+    // Clear badge from all tabs
+    updateBadgeForAllTabs('', '#000000');
+
+    // Clear persistent storage
+    chrome.storage.local.remove('globalPipState');
+
+    sendResponse({ success: true });
+    
+  } else if (request.action === 'pipStateUpdate') {
+    // Update global PiP state with validation
+    if (globalPipState.isActive) {
+      globalPipState.position = request.position || globalPipState.position;
+      globalPipState.size = request.size || globalPipState.size;
+      globalPipState.content = request.content || globalPipState.content;
+      
+      // Update persistent storage
+      chrome.storage.local.set({ globalPipState });
+    }
+    
+    sendResponse({ success: true, state: globalPipState });
+    
+  } else if (request.action === 'getPipState') {
+    // Return current PiP state with validation
+    sendResponse({
+      ...globalPipState,
+      isValidContext: !isRestrictedUrl(sender.tab?.url || ''),
+      tabId: sender.tab?.id
+    });
+    return true;
+    
+  } else if (request.action === 'registerPipCapable') {
+    // Register tab as PiP capable
+    pipCapableTabs.add(sender.tab.id);
+    sendResponse({ success: true });
+  }
+  
+  return true; // Keep message channel open for async responses
+});
+
+// Update badge for all tabs
+async function updateBadgeForAllTabs(text, color) {
+  try {
+    const tabs = await chrome.tabs.query({});
+    
+    for (const tab of tabs) {
+      try {
+        chrome.action.setBadgeText({
+          text: text,
+          tabId: tab.id
+        });
+        chrome.action.setBadgeBackgroundColor({
+          color: color,
+          tabId: tab.id
+        });
+      } catch (error) {
+        // Ignore errors for individual tabs
+      }
+    }
+  } catch (error) {
+    console.error('Error updating badges:', error);
   }
 }
-)
 
 // Clean up when tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {

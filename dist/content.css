@@ -111,6 +111,29 @@
   content-visibility: visible !important;
   /* Prevent any layout shifts */
   contain: none !important;
+  /* Enhanced persistence for hidden tabs */
+  z-index: 2147483647 !important;
+  isolation: isolate !important;
+  pointer-events: auto !important;
+}
+
+/* Special handling for hidden tab state */
+.pip-window[data-pip-hidden-tab="true"] {
+  /* Maximum persistence when tab is hidden */
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  visibility: visible !important;
+  display: block !important;
+  opacity: 1 !important;
+  transform: translateZ(0) !important;
+  will-change: transform !important;
+  /* Prevent any interference */
+  isolation: isolate !important;
+  contain: none !important;
+  clip: auto !important;
+  clip-path: none !important;
+  mask: none !important;
+  filter: none !important;
 }
 
 /* Enhanced window states */

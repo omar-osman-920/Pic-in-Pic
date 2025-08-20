@@ -161,11 +161,27 @@ async function injectPipIntoTab(tabId) {
     // Check if tab is valid and accessible
     const tab = await chrome.tabs.get(tabId);
     if (!tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
-      // Inject content script if needed
-      await chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        files: ['content.js']
-      });
+      // Wait for tab to be ready
+      if (tab.status !== 'complete') {
+        await waitForTabComplete(tabId);
+      }
+      
+      try {
+        // Inject content script if needed
+        await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          files: ['content.js']
+        });
+        
+        // Inject CSS
+        await chrome.scripting.insertCSS({
+          target: { tabId: tabId },
+          files: ['content.css']
+        });
+      } catch (injectionError) {
+        // Script might already be injected
+        console.log('Script injection skipped (likely already injected):', injectionError.message);
+      }
       
       // Restore PiP window
       await chrome.tabs.sendMessage(tabId, {
@@ -175,7 +191,28 @@ async function injectPipIntoTab(tabId) {
     }
   } catch (error) {
     console.log('Could not inject PiP into tab:', error);
+    throw error; // Re-throw for retry mechanism
   }
+}
+
+// Wait for tab to complete loading
+function waitForTabComplete(tabId, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error('Tab loading timeout'));
+    }, timeout);
+
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        clearTimeout(timeoutId);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
 }
 
 // Handle extension icon click
