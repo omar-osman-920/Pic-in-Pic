@@ -2,7 +2,7 @@ class InteractivePiP {
   constructor() {
     this.isSelecting = false;
     this.pipWindow = null;
-    this.isPersistentPip = false;
+    this.isPersistentPip = true;
     this.selectedElement = null;
     this.overlay = null;
     this.highlight = null;
@@ -18,6 +18,12 @@ class InteractivePiP {
     this.originalElement = null;
     this.mutationObserver = null;
     this.resizeObserver = null;
+    this.persistenceId = null;
+    this.visibilityHandler = null;
+    this.focusHandler = null;
+    this.beforeUnloadHandler = null;
+    this.isTabVisible = true;
+    this.persistenceCheckInterval = null;
     
     this.init();
   }
@@ -28,6 +34,7 @@ class InteractivePiP {
     this.loadSettings();
     this.setupStateSync();
     this.checkForExistingPip();
+    this.setupPersistenceHandlers();
   }
   
   async checkForExistingPip() {
